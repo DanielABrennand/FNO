@@ -1,5 +1,6 @@
 import torch.nn as nn
-from torch import flatten,fft,einsum,rand,cfloat,zeros
+from torch import flatten,fft,einsum,rand,cfloat,zeros,cat,tensor,float
+import numpy as np
 ###
 #LeNet
 ###
@@ -98,7 +99,7 @@ class SpectralConv2d_fast(nn.Module):
         x_ft = fft.rfft2(x)
 
         # Multiply relevant Fourier modes
-        out_ft = zeros(batchsize, self.out_channels,  x.size(-2), x.size(-1)//2 + 1, dtype=torch.cfloat, device=x.device)
+        out_ft = zeros(batchsize, self.out_channels,  x.size(-2), x.size(-1)//2 + 1, dtype=cfloat, device=x.device)
         out_ft[:, :, :self.modes1, :self.modes2] = \
             self.compl_mul2d(x_ft[:, :, :self.modes1, :self.modes2], self.weights1)
         out_ft[:, :, -self.modes1:, :self.modes2] = \
@@ -109,3 +110,83 @@ class SpectralConv2d_fast(nn.Module):
         return x
 
 #Full FNO
+class FNO2d(nn.Module):
+    def __init__(self, modes1, modes2, width):
+        super(FNO2d, self).__init__()
+
+        """
+        The overall network. It contains 4 layers of the Fourier layer.
+        1. Lift the input to the desire channel dimension by self.fc0 .
+        2. 4 layers of the integral operators u' = (W + K)(u).
+            W defined by self.w; K defined by self.conv .
+        3. Project from the channel space to the output space by self.fc1 and self.fc2 .
+        
+        input: the solution of the previous 10 timesteps + 2 locations (u(t-10, x, y), ..., u(t-1, x, y),  x, y)
+        input shape: (batchsize, x=64, y=64, c=12)
+        output: the solution of the next timestep
+        output shape: (batchsize, x=64, y=64, c=1)
+        """
+
+        self.modes1 = modes1
+        self.modes2 = modes2
+        self.width = width
+        self.padding = 2 # pad the domain if input is non-periodic
+        self.fc0 = nn.Linear(12, self.width)
+        # input channel is 12: the solution of the previous 10 timesteps + 2 locations (u(t-10, x, y), ..., u(t-1, x, y),  x, y)
+
+        self.conv0 = SpectralConv2d_fast(self.width, self.width, self.modes1, self.modes2)
+        self.conv1 = SpectralConv2d_fast(self.width, self.width, self.modes1, self.modes2)
+        self.conv2 = SpectralConv2d_fast(self.width, self.width, self.modes1, self.modes2)
+        self.conv3 = SpectralConv2d_fast(self.width, self.width, self.modes1, self.modes2)
+        self.w0 = nn.Conv2d(self.width, self.width, 1)
+        self.w1 = nn.Conv2d(self.width, self.width, 1)
+        self.w2 = nn.Conv2d(self.width, self.width, 1)
+        self.w3 = nn.Conv2d(self.width, self.width, 1)
+        self.bn0 = nn.BatchNorm2d(self.width)
+        self.bn1 = nn.BatchNorm2d(self.width)
+        self.bn2 = nn.BatchNorm2d(self.width)
+        self.bn3 = nn.BatchNorm2d(self.width)
+
+        self.fc1 = nn.Linear(self.width, 128)
+        self.fc2 = nn.Linear(128, 1)
+
+    def forward(self, x):
+        grid = self.get_grid(x.shape, x.device)
+        x = cat((x, grid), dim=-1)
+        x = self.fc0(x)
+        x = x.permute(0, 3, 1, 2)
+        # x = F.pad(x, [0,self.padding, 0,self.padding]) # pad the domain if input is non-periodic
+
+        x1 = self.conv0(x)
+        x2 = self.w0(x)
+        x = x1 + x2
+        x = nn.functional.gelu(x)
+
+        x1 = self.conv1(x)
+        x2 = self.w1(x)
+        x = x1 + x2
+        x = nn.functional.gelu(x)
+
+        x1 = self.conv2(x)
+        x2 = self.w2(x)
+        x = x1 + x2
+        x = nn.functional.gelu(x)
+
+        x1 = self.conv3(x)
+        x2 = self.w3(x)
+        x = x1 + x2
+
+        # x = x[..., :-self.padding, :-self.padding] # pad the domain if input is non-periodic
+        x = x.permute(0, 2, 3, 1)
+        x = self.fc1(x)
+        x = nn.functional.gelu(x)
+        x = self.fc2(x)
+        return x
+
+    def get_grid(self, shape, device):
+        batchsize, size_x, size_y = shape[0], shape[1], shape[2]
+        gridx = tensor(np.linspace(0, 1, size_x), dtype=float)
+        gridx = gridx.reshape(1, size_x, 1, 1).repeat([batchsize, 1, size_y, 1])
+        gridy = tensor(np.linspace(0, 1, size_y), dtype=float)
+        gridy = gridy.reshape(1, 1, size_y, 1).repeat([batchsize, size_x, 1, 1])
+        return cat((gridx, gridy), dim=-1).to(device)
