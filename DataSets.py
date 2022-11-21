@@ -57,6 +57,7 @@ class NumpyDataSet(Dataset):
         sample = {'xx' : image, 'yy' : mode}
         return sample
 
+
 class FNOH5DataSet(Dataset):
     def __init__(self,base_path,t_in,cutoff):
         self.base_path = base_path

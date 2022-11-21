@@ -31,6 +31,7 @@ class LeNet(nn.Module):
 ###
 #AlexNet
 ###
+
 class AlexNet(nn.Module):
     def __init__(self,dropout: float = 0.5):
         super().__init__()
@@ -71,6 +72,7 @@ class AlexNet(nn.Module):
 #FNO
 ###
 #Fourier layer
+
 class SpectralConv2d_fast(nn.Module):
     def __init__(self, in_channels, out_channels, modes1, modes2):
         super(SpectralConv2d_fast, self).__init__()
@@ -110,6 +112,7 @@ class SpectralConv2d_fast(nn.Module):
         return x
 
 #Full FNO
+
 class FNO2d(nn.Module):
     def __init__(self, modes1, modes2, width):
         super(FNO2d, self).__init__()
