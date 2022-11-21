@@ -6,7 +6,10 @@ from torch import nn,optim,save,cuda,from_numpy,manual_seed
 from torch.utils.data import DataLoader,TensorDataset
 from torchvision import transforms
 from os.path import join
-from numpy import load,random
+from numpy import load,random,save,array
+from UtilityFunctions import LpLoss
+from simvue import Run
+import time
 import wandb
 import gc
 
@@ -17,39 +20,38 @@ import gc
 ###
 
 #Overall Info
-PROJECT = "LHClassifierGeoffSaveLoadTest"
-MODEL_NAME = "AlexNetV2"
+PROJECT = "FNOGeoffTest1"
+MODEL_NAME = "CAMFNOV1"
 
 DEVICE = "cuda" if cuda.is_available() else "cpu"
 
 #Hyper Parameters
 SHUFFLE = True
 WORKERS = 0
-BATCH_SIZE = 20
+BATCH_SIZE = 8
 
-EPOCHS = 100
-LOSS_FN = "BCELoss"
-OPTIMIZER = "SGD"
-MOMENTUM = 0.9
+EPOCHS = 1
+LOSS_FN = "LpLoss"
+OPTIMIZER = "Adam"
 LEARNING_RATE = 0.001
 
-CONFIDENCE_THRESHOLD = 0.8
+T_IN = 10
+T_OUT = 50
+STEP = 1
+
+CUTOFF = 200
 
 SEED = None
 if not SEED:
     SEED = random.randint(0,9223372036854775807)
 
 #Data Locations
-TRAINING_DATA_ROOT = "/home/dbren/VSCode/DataStore/NumpyData/Training"
-TRAINING_MODES_PATH = "/home/dbren/VSCode/DataStore/NumpyData/Training/TrainingModes.npy"
+H5_TRAINING_FILE_LOCATION = "/home/dbren/VSCode/DataStore/RBB_FILES/Training"
+H5_VALIDATION_FILE_LOCATION = "/home/dbren/VSCode/DataStore/RBB_FILES/Validation"
+H5_TESTING_FILE_LOCATION = "/home/dbren/VSCode/DataStore/RBB_FILES/Testing"
 
-VALIDATION_DATA_ROOT = "/home/dbren/VSCode/DataStore/NumpyData/Validation"
-VALIDATION_MODES_PATH = "/home/dbren/VSCode/DataStore/NumpyData/Validation/ValidationModes.npy"
+IMAGE_SIZE = "448 x 640"
 
-TESTING_DATA_ROOT = "/home/dbren/VSCode/DataStore/NumpyData/Testing"
-TESTING_MODES_PATH = "/home/dbren/VSCode/DataStore/NumpyData/Testing/TestingModes.npy"
-
-IMAGE_SIZE = 512
 #Optional Modes
 EPOCH_SAVE_INTERVAL = 0 #0 for off
 FINAL_SAVING = True
@@ -60,7 +62,7 @@ TESTING = True
 HEURISTICS_SAVE_PATH = "/home/dbren/VSCode/DataStore/Heuristics"
 
 ###
-#WandB setup
+#SimVue setup
 ###
 
 configuration = {"Model": MODEL_NAME,
@@ -69,101 +71,87 @@ configuration = {"Model": MODEL_NAME,
                  "Optimizer": OPTIMIZER,
                  "Loss Function": LOSS_FN,
                  "Learning Rate": LEARNING_RATE,
-                 "Momentum": MOMENTUM,
                  "Device" : DEVICE,
                  "Epoch Save Interval": "Off" if EPOCH_SAVE_INTERVAL == 0 else EPOCH_SAVE_INTERVAL,
                  "Image Size": IMAGE_SIZE,
                  "Seed" : SEED,
-                 "Confidence Threshold": CONFIDENCE_THRESHOLD
+                 "T_in": T_IN,
+                 "T_Out" : T_OUT,
+                 "Step" : STEP,
+                 "Cutoff" : CUTOFF
                 }
 
-run = wandb.init(project=PROJECT,
-                 notes='',
-                 config=configuration)
+run = Run()
+
+
+#run.init(folder="/HPC-AI", tags=['OpenFOAM', 'Turbulent', 'Laminar', 'Surrogate', 'FNO'], metadata=configuration)
+run.init(folder = "/Geoff",tags = ['FNO','Test','Geoff'], metadata = configuration)
 
 manual_seed(SEED)
 
 ###
-#Model
+#Model 
 ###
 
-from Models import AlexNet
-Net = AlexNet().to(DEVICE)
+from Models import FNO2d
+Net = FNO2d(16,16,16).to(DEVICE)
 
 ###
 #Data input
 ###
-'''
-TrainingDataFrames = from_numpy(load(TRAINING_DATA_ROOT))
-TrainingDataModes = from_numpy(load(TRAINING_MODES_PATH))
-TrainingDataSet = TensorDataset(TrainingDataFrames,TrainingDataModes)
-TrainLoader = DataLoader(TrainingDataSet, batch_size=BATCH_SIZE, shuffle=SHUFFLE, num_workers=WORKERS)
-del TrainingDataFrames, TrainingDataModes
+from DataSets import FNOH5DataSet
 
-ValidationDataFrames = from_numpy(load(VALIDATION_DATA_ROOT))
-ValidationDataModes = from_numpy(load(VALIDATION_MODES_PATH))
-ValidationDataSet = TensorDataset(ValidationDataFrames,ValidationDataModes)
-ValidationLoader = DataLoader(ValidationDataSet, batch_size=BATCH_SIZE, shuffle=SHUFFLE, num_workers=WORKERS)
-del ValidationDataFrames, ValidationDataModes
+TrainingData = FNOH5DataSet(H5_TRAINING_FILE_LOCATION,T_IN,CUTOFF)
+TrainLoader = DataLoader(TrainingData,batch_size=BATCH_SIZE,shuffle=SHUFFLE,num_workers=WORKERS)
 
-TestingDataFrames = from_numpy(load(TESTING_DATA_ROOT))
-TestingDataMode = from_numpy(load(TESTING_MODES_PATH))
-TestingDataSet = TensorDataset(TestingDataFrames,TestingDataMode)
-TestLoader = DataLoader(TestingDataSet, batch_size=BATCH_SIZE, shuffle=SHUFFLE, num_workers=WORKERS)
-del TestingDataFrames, TestingDataMode
+ValidationData = FNOH5DataSet(H5_VALIDATION_FILE_LOCATION,T_IN,CUTOFF)
+ValidationLoader = DataLoader(ValidationData,batch_size=BATCH_SIZE,shuffle=SHUFFLE,num_workers=WORKERS)
 
-gc.collect()
-'''
-from DataSets import NumpyDataSet
-
-TrainingDataSet = NumpyDataSet(TRAINING_DATA_ROOT,TRAINING_MODES_PATH)
-TrainLoader = DataLoader(TrainingDataSet, batch_size=BATCH_SIZE, shuffle=SHUFFLE, num_workers=WORKERS)
-
-ValidationDataSet = NumpyDataSet(VALIDATION_DATA_ROOT,VALIDATION_MODES_PATH)
-ValidationLoader = DataLoader(ValidationDataSet, batch_size=BATCH_SIZE, shuffle=SHUFFLE, num_workers=WORKERS)
-
-TestingDataSet = NumpyDataSet(TESTING_DATA_ROOT,TESTING_MODES_PATH)
-TestLoader = DataLoader(TestingDataSet, batch_size=BATCH_SIZE, shuffle=False, num_workers=WORKERS)
-
+TestingData = FNOH5DataSet(H5_TESTING_FILE_LOCATION,T_IN,CUTOFF)
+TestLoader = DataLoader(TestingData,batch_size=BATCH_SIZE,shuffle=SHUFFLE,num_workers=WORKERS)
 ###
 #Training loop
 ###
 
-from TrainingLoops import BinaryClassiferTrainingLoop
-from TestingLoops import BinaryClassiferTestingLoop
+from TrainingLoops import FNOTrainingLoop
+from TestingLoops import FNOTestingLoop
 
-#LossFn = nn.BCELoss()
-LossFn = nn.BCEWithLogitsLoss()
-Optimizer = optim.SGD(Net.parameters(), lr=LEARNING_RATE, momentum=MOMENTUM)
-#Optimizer = optim.Adam(Net.parameters(),lr=LEARNING_RATE)
+LossFn = LpLoss(size_average=False)
+Optimizer = optim.Adam(Net.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
 
 for Epoch in range(EPOCHS):
-    TrainingLoss = BinaryClassiferTrainingLoop(DEVICE,TrainLoader,Net,LossFn,Optimizer)
-    ValidationLoss,Correct = BinaryClassiferTestingLoop(DEVICE,ValidationLoader,Net,LossFn,CONFIDENCE_THRESHOLD)
+    TrainingLoss = FNOTrainingLoop(DEVICE,TrainLoader,Net,LossFn,Optimizer,T_OUT,STEP)
+    ValidationLoss = FNOTestingLoop(DEVICE,ValidationLoader,Net,LossFn,Optimizer,T_OUT,STEP)
 
-    wandb.log({'Train Loss': TrainingLoss, 
-               'Validation Loss': ValidationLoss,
-               'Validation Correct': Correct})
+    TrainingLoss /= len(TrainingData)
+    ValidationLoss /= len(ValidationData)
+
+    #Logging
+    run.log_metrics({'Training Loss' : TrainingLoss, 'Validation Loss' : ValidationLoss})
 
     if EPOCH_SAVE_INTERVAL:
         if Epoch%EPOCH_SAVE_INTERVAL == 0:
-            save(Net.state_dict(), join(HEURISTICS_SAVE_PATH,(PROJECT + "_" + wandb.run.name + "_Epoch_" + str(Epoch) + ".pth")))
+            save(Net.state_dict(), join(HEURISTICS_SAVE_PATH,(PROJECT + "_" + time.time() + "_Epoch_" + str(Epoch) + ".pth")))
 
-del TrainingDataSet, TrainLoader, ValidationDataSet, ValidationLoader
-gc.collect()
+run.update_metadata({'Training Loss' : TrainingLoss, 'Validation Loss' : ValidationLoss})
 
 ###
 #Final Testing Loop
 ###
 
 if TESTING:
-    TestingLoss,Correct = BinaryClassiferTestingLoop(DEVICE,TestLoader,Net,LossFn,CONFIDENCE_THRESHOLD,True)
-    wandb.log({'Final Test Loss':TestingLoss,
-                'Final Test Correct': Correct})
+    TestingLoss,AllPreds = FNOTestingLoop(DEVICE,TestLoader,Net,LossFn,Optimizer,T_OUT,STEP,True)
+    TestingLoss /= len(TestingData)
+    run.update_metadata({'Testing Loss' : TestingLoss})
+    save('Predictions.npy',array(AllPreds))
+    run.save('Predictions.npy','Final Predictions')
+
 
 ###
 #Outputs
 ###
 
 if FINAL_SAVING:
-    save(Net.state_dict(), join(HEURISTICS_SAVE_PATH,("{}_{}_Full.pth").format(PROJECT,wandb.run.name)))
+    save(Net.state_dict(), join(HEURISTICS_SAVE_PATH,("{}_{}_Full.pth").format(PROJECT,time.time)))
+
+run.close()
