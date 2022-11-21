@@ -1,6 +1,8 @@
-from torch import no_grad, squeeze, float
+from torch import no_grad, squeeze, float,cat,zeros
 from UtilityFunctions import LogitPercentConverter as L2P
 import wandb
+import simvue
+
 def BinaryClassiferTestingLoop(Device,DataLoader,Model,LossFn,Threshold = 0.8,Final = False):
     Threshold = L2P.ToLogit(Threshold)
     Size = len(DataLoader.dataset)
@@ -44,3 +46,50 @@ def BinaryClassiferTestingLoop(Device,DataLoader,Model,LossFn,Threshold = 0.8,Fi
         Correct /= Size
 
     return TestLoss,Correct
+
+def FNOTestingLoop(Device,DataLoader,Model,LossFn,Optimizer,T,Step,Final = False):
+    Model.eval()
+    test_l2_step = 0
+    test_l2_full = 0
+    AllPreds = []
+    with no_grad():
+        for sample in DataLoader:
+
+            xx = sample['xx'].to(Device).float()
+            yy = sample['yy'].to(Device).float()
+
+            loss = 0
+            batch_size = xx.shape[0]
+
+            for t in range(0,T,Step):
+                y = yy[...,t:t+Step]
+
+                im = Model(xx)
+
+                loss += LossFn(im.reshape(batch_size, -1), y.reshape(batch_size, -1))
+
+                if t == 0: 
+                    pred = im
+                else:
+                    pred = cat((pred, im), -1)
+
+                xx = cat((xx[..., Step:], im), dim=-1)
+
+            test_l2_step += loss.item()
+            l2_full = LossFn(pred.reshape(batch_size, -1), yy.reshape(batch_size, -1))
+            test_l2_full += l2_full.item()
+
+            Optimizer.zero_grad()
+            loss.backward()
+            Optimizer.step()
+
+            if Final:
+                if len(AllPreds) == 0:
+                    AllPreds = pred
+                else:
+                    AllPreds = [AllPreds,pred]
+
+    if Final:
+        return test_l2_full, AllPreds
+    else:       
+        return test_l2_full
