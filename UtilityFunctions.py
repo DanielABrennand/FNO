@@ -20,6 +20,7 @@ class H5ToNumpy:
         F = h5py.File(FilePath)
         AllKeys = list(F.keys())
         NumFrames = min(len(AllKeys)-1,CutOff) #-1 for the time dataset
+        AllKeys = AllKeys[:NumFrames]
         if not Resolution:
             FrameRes = np.array(F[AllKeys[0]].shape)
         else:
