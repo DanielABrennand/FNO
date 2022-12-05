@@ -130,3 +130,6 @@ dmypy.json
 
 # SimVue
 .ini
+
+# Numpy Files
+.npy
