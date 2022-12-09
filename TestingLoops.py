@@ -2,6 +2,7 @@ from torch import no_grad, squeeze, float,cat,zeros
 from UtilityFunctions import LogitPercentConverter as L2P
 import wandb
 import simvue
+import numpy as np
 
 def BinaryClassiferTestingLoop(Device,DataLoader,Model,LossFn,Threshold = 0.8,Final = False):
     Threshold = L2P.ToLogit(Threshold)
@@ -79,11 +80,8 @@ def FNOTestingLoop(Device,DataLoader,Model,LossFn,Optimizer,T,Step,Final = False
             l2_full = LossFn(pred.reshape(batch_size, -1), yy.reshape(batch_size, -1))
             test_l2_full += l2_full.item()
 
-            Optimizer.zero_grad()
-            loss.backward()
-            Optimizer.step()
-
             if Final:
+                pred = np.array(pred.cpu())
                 if len(AllPreds) == 0:
                     AllPreds = pred
                 else:
