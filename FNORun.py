@@ -6,7 +6,7 @@ from torch import nn,optim,save,cuda,from_numpy,manual_seed
 from torch.utils.data import DataLoader,TensorDataset
 from torchvision import transforms
 from os.path import join
-from numpy import load,random,save,array
+import numpy as np
 from UtilityFunctions import LpLoss
 from simvue import Run
 import time
@@ -20,6 +20,7 @@ import gc
 ###
 
 #Overall Info
+
 PROJECT = "FNOGeoffTest1"
 MODEL_NAME = "CAMFNOV1"
 
@@ -28,7 +29,7 @@ DEVICE = "cuda" if cuda.is_available() else "cpu"
 #Hyper Parameters
 SHUFFLE = True
 WORKERS = 0
-BATCH_SIZE = 8
+BATCH_SIZE = 1
 
 EPOCHS = 1
 LOSS_FN = "LpLoss"
@@ -36,14 +37,14 @@ OPTIMIZER = "Adam"
 LEARNING_RATE = 0.001
 
 T_IN = 10
-T_OUT = 50
+T_OUT = 10
 STEP = 1
 
-CUTOFF = 200
+CUTOFF = T_IN + T_OUT
 
 SEED = None
 if not SEED:
-    SEED = random.randint(0,9223372036854775807)
+    SEED = np.random.randint(0,9223372036854775807)
 
 #Data Locations
 H5_TRAINING_FILE_LOCATION = "/home/dbren/VSCode/DataStore/RBB_FILES/Training"
@@ -54,7 +55,7 @@ IMAGE_SIZE = "448 x 640"
 
 #Optional Modes
 EPOCH_SAVE_INTERVAL = 0 #0 for off
-FINAL_SAVING = True
+FINAL_SAVING = False
 
 TESTING = True
 
@@ -77,8 +78,7 @@ configuration = {"Model": MODEL_NAME,
                  "Seed" : SEED,
                  "T_in": T_IN,
                  "T_Out" : T_OUT,
-                 "Step" : STEP,
-                 "Cutoff" : CUTOFF
+                 "Step" : STEP
                 }
 
 run = Run()
@@ -93,8 +93,13 @@ manual_seed(SEED)
 #Model 
 ###
 
+print("Before Model: " + str(cuda.mem_get_info()))
+
+
 from Models import FNO2d
 Net = FNO2d(16,16,16).to(DEVICE)
+
+print("After model:" + str(cuda.mem_get_info()))
 
 ###
 #Data input
@@ -143,8 +148,9 @@ if TESTING:
     TestingLoss,AllPreds = FNOTestingLoop(DEVICE,TestLoader,Net,LossFn,Optimizer,T_OUT,STEP,True)
     TestingLoss /= len(TestingData)
     run.update_metadata({'Testing Loss' : TestingLoss})
-    save('Predictions.npy',array(AllPreds))
-    run.save('Predictions.npy','Final Predictions')
+
+    np.save(str(time.time()) + ' Predictions.npy',np.array(AllPreds))
+    #run.save('Predictions.npy','Final Predictions')
 
 
 ###
