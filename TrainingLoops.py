@@ -1,5 +1,6 @@
-from torch import squeeze,cat
+from torch import squeeze,cat,cuda,ones
 import wandb
+
 def BinaryClassiferTrainingLoop(Device,DataLoader,Model,LossFn,Optimizer):
     Batches = len(DataLoader)
     Model.train()
@@ -46,17 +47,25 @@ def FNOTrainingLoop(Device,DataLoader,Model,LossFn,Optimizer,T,Step):
         xx = sample['xx'].to(Device).float()
         yy = sample['yy'].to(Device).float()
 
+        print("After Sample: " + str(cuda.mem_get_info()))
+        
         loss = 0
         batch_size = xx.shape[0]
 
-        for t in range(0,T,Step):
+        for t in range(0,T,Step): 
+            print("-------------------------------Step " + str(t) + "-------------------------------")  
+
             y = yy[...,t:t+Step]
 
-            print(xx.shape)
-            
+            print("After y: " + str(cuda.mem_get_info()))
+            print("Memory allocated after y: " + str(cuda.memory_allocated()))
             im = Model(xx)
 
+            print("After im: " + str(cuda.mem_get_info()))
+            print("Memory allocated after im: " + str(cuda.memory_allocated()))
+
             loss += LossFn(im.reshape(batch_size, -1), y.reshape(batch_size, -1))
+            
 
             if t == 0:
                 pred = im
@@ -64,6 +73,7 @@ def FNOTrainingLoop(Device,DataLoader,Model,LossFn,Optimizer,T,Step):
                 pred = cat((pred, im), -1)
 
             xx = cat((xx[..., Step:], im), dim=-1)
+            print("After Recursive Loop: " + str(cuda.mem_get_info()))
 
         train_l2_step += loss.item()
         l2_full = LossFn(pred.reshape(batch_size, -1), yy.reshape(batch_size, -1))
